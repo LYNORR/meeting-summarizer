@@ -4,6 +4,8 @@
 
 *Local AI service that turns a meeting recording into structured minutes (Whisper + LLM).*
 
+**Демо:** [lynorr.github.io/meeting-summarizer](https://lynorr.github.io/meeting-summarizer/) — интерфейс и настоящий пример результата. Свои записи сервис обрабатывает при локальном запуске.
+
 ![Python](https://img.shields.io/badge/Python-3.12-3776AB?logo=python&logoColor=white)
 ![FastAPI](https://img.shields.io/badge/FastAPI-0.142-009688?logo=fastapi&logoColor=white)
 ![Whisper](https://img.shields.io/badge/Whisper-faster--whisper-FF7A1A)

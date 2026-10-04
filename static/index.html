@@ -204,6 +204,8 @@
   .notice { padding: 14px 18px; border-radius: 14px; margin-bottom: 16px; }
   .notice.error { background: #fff0ef; color: #b3261e; border: 1px solid rgba(255, 95, 87, 0.4); }
   .notice.warn { background: #fff8e6; color: #7a5300; border: 1px solid rgba(254, 188, 46, 0.6); }
+  .notice.demo { background: #eef5ff; border: 1px solid rgba(10, 132, 255, 0.35); }
+  .notice.demo a { color: #0062cc; font-weight: 600; }
 
   .loader-title { font-size: 18px; font-weight: 650; }
   .loader-title span { color: var(--orange-dark); font-variant-numeric: tabular-nums; }
@@ -412,6 +414,11 @@
 
     <div id="health" class="notice warn" hidden></div>
 
+    <div id="demo-notice" class="notice demo" hidden>
+      <strong>Демо-версия.</strong> Ниже — настоящий результат обработки тестовой записи. Свои записи сервис обрабатывает только при локальном запуске: модели весят около 4 ГБ, а запись совещания не должна покидать компьютер.
+      <a href="https://github.com/LYNORR/meeting-summarizer#быстрый-запуск-macos" target="_blank" rel="noopener">Как запустить у себя →</a>
+    </div>
+
     <section class="card window">
       <div class="titlebar">
         <span class="lights"><i></i><i></i><i></i></span>
@@ -443,7 +450,7 @@
     <div id="result" hidden>
       <div class="result-head">
         <div>
-          <h2>Протокол <span class="badge">готов</span></h2>
+          <h2>Протокол <span id="result-badge" class="badge">готов</span></h2>
           <div id="stats" class="stats"></div>
         </div>
         <button id="download-btn" class="btn btn-primary">Скачать .txt</button>
@@ -693,6 +700,8 @@
   let selectedFile = null;
   let reportText = "";
   let timerId = null;
+  // На GitHub Pages нет сервера с моделями — страница работает как демо с настоящим примером результата.
+  const DEMO = location.hostname.endsWith("github.io");
 
   function showError(message) {
     $("error").textContent = message;
@@ -712,7 +721,7 @@
     }
     selectedFile = file;
     $("file-name").textContent = `${file.name} · ${(file.size / 1024 / 1024).toFixed(1)} МБ`;
-    $("process-btn").disabled = false;
+    $("process-btn").disabled = DEMO;
   }
 
   // Выбор файла через диалог
@@ -786,7 +795,7 @@
     }
   }
 
-  function renderResult(data) {
+  function renderResult(data, scroll = true) {
     fillList($("topics"), data.topics, "Не выделены");
     fillList($("decisions"), data.decisions, "Решений не зафиксировано");
     $("summary").textContent = data.summary;
@@ -810,7 +819,7 @@
 
     reportText = data.report_text;
     $("result").hidden = false;
-    $("result").scrollIntoView({ block: "start" });
+    if (scroll) $("result").scrollIntoView({ block: "start" });
   }
 
   // Файл формируется прямо в браузере (Blob): сервер ничего не хранит.
@@ -821,7 +830,7 @@
     const d = new Date();
     const date = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
     link.href = url;
-    link.download = `protocol_${date}.txt`;
+    link.download = DEMO ? "protocol_example.txt" : `protocol_${date}.txt`;
     link.click();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
@@ -829,16 +838,56 @@
   $("process-btn").addEventListener("click", processFile);
   $("download-btn").addEventListener("click", downloadReport);
 
-  // При открытии страницы проверяем, что Ollama запущена и модель скачана.
-  fetch("/api/health")
-    .then((response) => response.json())
-    .then((data) => {
-      if (!data.ok) {
-        $("health").textContent = data.message;
-        $("health").hidden = false;
-      }
-    })
-    .catch(() => {});
+  // ---------- Демо-режим (GitHub Pages) ----------
+  // Настоящий результат обработки тестовой записи — тот же, что в examples/example_result.txt.
+  const DEMO_RESULT = {
+    topics: ["Готовность к релизу мобильного приложения", "Ошибки после тестирования", "Маркетинговая компания"],
+    summary: "На совещании обсуждалась готовность к релизу мобильного приложения, выявленные ошибки после тестирования и планирование маркетинговой кампании. Было принято решение о переносе даты релиза с 1 ноября на 10 ноября из-за проблем с запуском на старых телефонах. Также обсудили необходимость исправления критической ошибки оплаты и подготовки отчета по всем найденным ошибкам. Маркетинговая компания была перенесена в соответствии с новой датой релиза. Не было принято решения о проведении бета-тестирования.",
+    decisions: [
+      "Перенос даты релиза мобильного приложения с 1 ноября на 10 ноября",
+      "Перенос старта маркетинговой кампании в социальных сетях на 10 ноября",
+      "Перенос бета-тестирования на следующую встречу",
+    ],
+    tasks: [
+      { task: "Оптимизация запуска приложения", owner: "Дмитрий", deadline: "24 октября" },
+      { task: "Исправление критической ошибки соплаты и подготовка отчета по ошибкам", owner: "Ольга", deadline: "пятница" },
+      { task: "Обновление медиаплана", owner: "Сергей", deadline: "до релиза" },
+      { task: "Обновление скриншотов приложения в магазине приложений", owner: "не указано", deadline: "до релиза" },
+    ],
+    transcript: "Доброе утро, коллеги, это Анна. Давайте начнем нашу еженедельную планерку по запуску мобильного приложения. Сегодня у нас три вопроса, готовность к релизу, ошибки после тестирования и маркетинговая компания. Дмитрий, начнем с тебя, как дела с релизом? Спасибо, Анна, в целом мы почти готовы. Основной функционал собран, сборка для тестирования выложена еще в понедельник, Но есть проблема, на старых телефонах приложение долго запускается, примерно 8 секунд, это слишком много, я предлагаю перенести релиз с первого ноября на 10 ноября, чтобы успеть оптимизировать запуск. Понятно, Ольга, что скажешь со стороны тестирования? Я согласна с Дмитрием, мы нашли 12 ошибок, из них 3 критические, самое серьёзное, при оплате карты приложения иногда закрывается, если выпустим так, будут жалобы и плохие отзывы, я заперенос. Хорошо, тогда решаем, релиз переносим на 10 ноября. Возражения есть? Нет. Нет, всё правильно. Отлично, тогда задача, Дмитрий, на тебе оптимизация запуска приложения, сделай, пожалуйста, до 24 октября. Хорошо, успею. Ольга, ты исправляешь вместе с разработчиками критическую ошибку соплата и готовишь полный отчет по всем 12 ошибкам, отчет нужен к пятнице. Принято. Теперь маркетинг, Сергей, ты здесь? Да, я здесь, мы подготовили рекламную компанию в социальных сетях, бюджет 200 тысяч рублей, раз релиз переносится, компанию тоже нужно сдвинуть, иначе мы потратим деньги, а скачать приложение будет нельзя. Согласно, решаем, старт рекламной компанию переносим вслед за релизом, на 10 ноября, Сергей, обнови, пожалуйста, медиаплан под новую дату. Хорошо, сделаю. И еще один момент, нам нужно обновить скриншоты приложения в магазине, потому что интерфейс поменялся, кто может этим заняться. Сложно сказать, у дизайнеров сейчас много работы, давайте решим это на следующей неделе. Хорошо, но задачу все равно фиксируем, обновить скриншоты в магазине приложений до релиза, ответственно определим позже. Последнее, Сергей предлагал запустить бета-тестирование для ста пользователей, мнения разделились, поэтому пока ничего не решаем, вернемся к этому вопросу в следующий раз. На этом все, подведу итог, релиз и реклама переносится на 10 ноября, Дмитрий оптимизирует запуск до 24 октября, Ольга готовит отчет по ошибкам к пятнице, Сергей обновляет медиаплан, следующая встреча в понедельник в 10 утра. Всем спасибо, до свидания!",
+    stats: { duration_sec: 184.4, transcribe_sec: 24.0, summarize_sec: 25.4 },
+  };
+
+  function setupDemo() {
+    $("demo-notice").hidden = false;
+    $("process-btn").textContent = "Обработка — при локальном запуске";
+    $("result-badge").textContent = "пример";
+    renderResult(DEMO_RESULT, false);
+    // Кнопка скачивания отдаёт тот же реальный протокол из репозитория; прячем её, пока файл не загрузился.
+    $("download-btn").hidden = true;
+    fetch("../examples/example_result.txt")
+      .then((response) => (response.ok ? response.text() : Promise.reject()))
+      .then((text) => {
+        reportText = text;
+        $("download-btn").hidden = false;
+      })
+      .catch(() => {});
+  }
+
+  if (DEMO) {
+    setupDemo();
+  } else {
+    // При открытии страницы проверяем, что Ollama запущена и модель скачана.
+    fetch("/api/health")
+      .then((response) => response.json())
+      .then((data) => {
+        if (!data.ok) {
+          $("health").textContent = data.message;
+          $("health").hidden = false;
+        }
+      })
+      .catch(() => {});
+  }
 </script>
 </body>
 </html>
