@@ -1,0 +1,7 @@
+fastapi==0.142.2
+uvicorn==0.54.0
+python-multipart==0.0.32
+faster-whisper==1.2.1
+# PyAV 19 убрал аргумент metadata_errors, который передаёт faster-whisper 1.2.1
+av==18.1.0
+requests==2.34.2

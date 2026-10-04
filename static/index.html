@@ -1,0 +1,844 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Meeting Summarizer — протокол совещания</title>
+<link rel="icon" href="data:,">
+<style>
+  :root {
+    /* Основная палитра: оранжевый, белый, чёрный */
+    --bg: #f7f5f2;
+    --white: #ffffff;
+    --text: #141414;
+    --muted: #55585d;   /* чуть темнее, чтобы подписи читались поверх цветного фона */
+    --orange: #ff7a1a;
+    --orange-dark: #d95f00;
+    --orange-soft: #fff1e6;
+    /* Дополнительные цвета — как «светофор» окон macOS */
+    --red: #ff5f57;
+    --yellow: #febc2e;
+    --green: #28c840;
+    --blue: #0a84ff;
+    --purple: #af52de;
+    --line: rgba(0, 0, 0, 0.07);
+    --radius: 20px;
+    --shadow: 0 1px 2px rgba(0, 0, 0, 0.04), 0 14px 34px -14px rgba(0, 0, 0, 0.14);
+    --width: min(1040px, calc(100% - 24px));
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    min-height: 100vh;
+    background: var(--bg);
+    color: var(--text);
+    font: 16px/1.55 -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", Roboto, Arial, sans-serif;
+  }
+  /* Фон в стиле обоев macOS: SVG с волнами внутри страницы (без внешних файлов), не двигается при прокрутке */
+  .wallpaper {
+    position: fixed;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    z-index: -1;
+    pointer-events: none;
+  }
+  /* Подписи прямо на фоне получают лёгкую белую подложку, чтобы читались поверх ярких волн */
+  .eyebrow, .section > h2, .lead { text-shadow: 0 1px 12px rgba(255, 255, 255, 0.9); }
+  a { color: var(--orange-dark); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  p { margin: 0; }
+  [hidden] { display: none !important; }
+
+  /* ---------- «Светофор» как на окнах macOS ---------- */
+  .lights { display: inline-flex; gap: 7px; }
+  .lights i { width: 12px; height: 12px; border-radius: 50%; display: block; box-shadow: inset 0 0 0 0.5px rgba(0, 0, 0, 0.12); }
+  .lights i:nth-child(1) { background: var(--red); }
+  .lights i:nth-child(2) { background: var(--yellow); }
+  .lights i:nth-child(3) { background: var(--green); }
+
+  /* ---------- Карточки ---------- */
+  .card {
+    background: var(--white);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+    padding: 24px 28px;
+    margin-bottom: 16px;
+  }
+  /* Цветная точка у заголовка карточки: цвет задаётся переменной --dot */
+  .card h3 { margin: 0 0 14px; font-size: 18px; font-weight: 650; display: flex; align-items: center; gap: 10px; }
+  .card h3::before { content: ""; width: 10px; height: 10px; border-radius: 50%; background: var(--dot, var(--orange)); box-shadow: 0 0 0 4px color-mix(in srgb, var(--dot, var(--orange)) 18%, transparent); }
+  .dot-blue { --dot: var(--blue); }
+  .dot-green { --dot: var(--green); }
+  .dot-yellow { --dot: var(--yellow); }
+  .dot-red { --dot: var(--red); }
+  .dot-purple { --dot: var(--purple); }
+
+  /* Карточка в виде окна macOS */
+  .window { padding: 0; overflow: hidden; }
+  .titlebar {
+    display: grid;
+    grid-template-columns: 1fr auto 1fr;
+    align-items: center;
+    padding: 12px 16px;
+    background: linear-gradient(#fbfbfb, #f2f2f2);
+    border-bottom: 1px solid var(--line);
+  }
+  .titlebar-title { color: var(--muted); font-size: 13.5px; font-weight: 600; }
+  .window-body { padding: 28px; }
+
+  /* ---------- Шапка с вкладками ---------- */
+  /* Шапка прилегает к верхнему краю: при «плавающей» шапке в щели над ней было видно прокручиваемый контент */
+  header {
+    position: sticky;
+    top: 0;
+    z-index: 10;
+    width: var(--width);
+    margin: 0 auto;
+    padding: 12px 12px 12px 18px;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    border-radius: 0 0 18px 18px;
+    background: rgba(255, 255, 255, 0.78);
+    border: 1px solid var(--line);
+    border-top: none;
+    box-shadow: var(--shadow);
+    backdrop-filter: blur(18px) saturate(180%);
+    -webkit-backdrop-filter: blur(18px) saturate(180%);
+  }
+  .brand { display: flex; align-items: center; gap: 12px; font-weight: 700; color: var(--text); white-space: nowrap; }
+  .brand:hover { text-decoration: none; }
+  .tabs { display: flex; gap: 4px; margin: 0 auto; }
+  .tab {
+    font: inherit;
+    font-size: 15px;
+    padding: 8px 16px;
+    border: none;
+    border-radius: 12px;
+    background: transparent;
+    color: var(--muted);
+    cursor: pointer;
+  }
+  .tab:hover { color: var(--text); background: rgba(0, 0, 0, 0.04); }
+  .tab.active { background: var(--text); color: var(--white); }
+
+  /* ---------- Кнопки ---------- */
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    font: inherit;
+    font-weight: 650;
+    padding: 12px 26px;
+    border-radius: 14px;
+    border: none;
+    cursor: pointer;
+    white-space: nowrap;
+  }
+  .btn:hover { text-decoration: none; }
+  .btn-primary { background: var(--orange); color: #111; box-shadow: 0 10px 24px -10px rgba(255, 122, 26, 0.8); }
+  .btn-primary:hover { background: #ff8c3a; }
+  .btn-ghost { background: var(--white); color: var(--text); box-shadow: inset 0 0 0 1px var(--line), var(--shadow); padding: 8px 16px; font-size: 14px; }
+  .btn-ghost .tg { width: 8px; height: 8px; border-radius: 50%; background: var(--blue); }
+  .btn:disabled { opacity: 0.35; cursor: not-allowed; box-shadow: none; }
+
+  /* ---------- Основная часть ---------- */
+  main { width: var(--width); margin: 0 auto; padding: 48px 0 40px; }
+  .hero { margin-bottom: 32px; }
+  .eyebrow { display: inline-flex; align-items: center; gap: 8px; color: var(--orange-dark); font-weight: 700; font-size: 13px; letter-spacing: 0.08em; text-transform: uppercase; margin-bottom: 12px; }
+  h1 { margin: 0 0 14px; font-size: clamp(34px, 5.5vw, 58px); line-height: 1.08; font-weight: 800; letter-spacing: -0.02em; }
+  h2 { margin: 0 0 18px; font-size: clamp(26px, 3.5vw, 36px); line-height: 1.15; font-weight: 750; letter-spacing: -0.01em; }
+  .gradient-text {
+    /* градиент темнее «светофора», иначе жёлтый край теряется на тёплом фоне */
+    background: linear-gradient(90deg, #e5443b, #ff6a00 50%, #e89200);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+  .lead { color: var(--muted); font-size: 18px; max-width: 680px; }
+  .pills { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 22px; }
+  .pill { display: inline-flex; align-items: center; gap: 8px; padding: 7px 14px; border-radius: 999px; font-size: 14px; background: var(--white); border: 1px solid var(--line); box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04); }
+  .pill::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--dot); }
+  .pill:nth-child(1) { --dot: var(--red); }
+  .pill:nth-child(2) { --dot: var(--yellow); }
+  .pill:nth-child(3) { --dot: var(--green); }
+  .pill:nth-child(4) { --dot: var(--blue); }
+
+  /* ---------- Загрузка ---------- */
+  .drop-zone {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
+    padding: 36px 16px;
+    border: 1.5px dashed rgba(0, 0, 0, 0.18);
+    border-radius: 16px;
+    text-align: center;
+    cursor: pointer;
+    background: #fcfbfa;
+    transition: border-color 0.15s, background 0.15s;
+  }
+  .drop-zone:hover, .drop-zone.dragover { border-color: var(--orange); background: var(--orange-soft); }
+  .drop-zone input { display: none; }
+  .drop-icon {
+    width: 56px;
+    height: 56px;
+    border-radius: 16px;
+    display: grid;
+    place-items: center;
+    font-size: 26px;
+    font-weight: 700;
+    color: var(--white);
+    background: linear-gradient(135deg, var(--yellow), var(--orange) 55%, var(--red));
+    box-shadow: 0 10px 22px -10px rgba(255, 95, 87, 0.8);
+    margin-bottom: 8px;
+  }
+  .drop-title { font-size: 17px; font-weight: 600; }
+  .drop-title u { color: var(--orange-dark); text-underline-offset: 3px; }
+  .hint { color: var(--muted); font-size: 14px; }
+  .file-name { margin-top: 10px; font-weight: 600; color: var(--orange-dark); }
+  .upload-actions { display: flex; justify-content: center; margin-top: 20px; }
+
+  .notice { padding: 14px 18px; border-radius: 14px; margin-bottom: 16px; }
+  .notice.error { background: #fff0ef; color: #b3261e; border: 1px solid rgba(255, 95, 87, 0.4); }
+  .notice.warn { background: #fff8e6; color: #7a5300; border: 1px solid rgba(254, 188, 46, 0.6); }
+
+  .loader-title { font-size: 18px; font-weight: 650; }
+  .loader-title span { color: var(--orange-dark); font-variant-numeric: tabular-nums; }
+  .progress { height: 6px; border-radius: 999px; background: rgba(0, 0, 0, 0.06); overflow: hidden; margin: 14px 0 12px; }
+  .progress div {
+    height: 100%;
+    width: 40%;
+    border-radius: 999px;
+    background: linear-gradient(90deg, var(--red), var(--orange), var(--yellow), var(--green));
+    animation: slide 1.6s ease-in-out infinite;
+  }
+  @keyframes slide { from { transform: translateX(-100%); } to { transform: translateX(250%); } }
+
+  /* ---------- Результат ---------- */
+  #result { scroll-margin-top: 90px; }  /* при автопрокрутке к результату заголовок не уходит под шапку */
+  .result-head { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; margin: 32px 0 16px; }
+  .result-head h2 { margin: 0; display: flex; align-items: center; gap: 12px; }
+  .badge { font-size: 13px; font-weight: 700; color: #137a26; background: #e6f8ea; border-radius: 999px; padding: 4px 10px; letter-spacing: 0; }
+  .stats { color: var(--muted); font-size: 14px; margin-top: 6px; }
+  .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 16px; }
+  .grid-2 .card { margin-bottom: 0; }
+  ol, ul { margin: 0; padding-left: 22px; }
+  li + li { margin-top: 6px; }
+  li::marker { color: var(--dot, var(--orange)); font-weight: 700; }
+  .summary { font-size: 17px; }
+  .table-wrap { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; font-size: 15px; }
+  th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { color: var(--muted); font-size: 12.5px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; background: #faf9f7; }
+  th:first-child { border-radius: 10px 0 0 10px; }
+  th:last-child { border-radius: 0 10px 10px 0; }
+  #tasks-table th:nth-child(n+2), #tasks-table td:nth-child(n+2) { white-space: nowrap; }  /* имя и срок — в одну строку */
+  tr:last-child td { border-bottom: none; }
+  .empty { color: var(--muted); }
+  details summary { cursor: pointer; font-weight: 650; font-size: 18px; }
+  details summary::marker { color: var(--purple); }
+  .transcript { margin-top: 14px; white-space: pre-wrap; color: #3c3f44; }
+
+  /* ---------- О проекте ---------- */
+  .section { margin-bottom: 56px; }
+  .story p { font-size: 17px; }
+  .story p + p { margin-top: 14px; }
+  .steps { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+  .step { border-top: 4px solid var(--dot); margin-bottom: 0; }
+  .step-num { font-size: 34px; font-weight: 800; line-height: 1; margin-bottom: 12px; color: var(--num); }
+  .step h4 { margin: 0 0 8px; font-size: 18px; }
+  .step p { color: var(--muted); font-size: 15px; }
+  .step:nth-child(1) { --dot: var(--red); --num: #e5443b; }
+  .step:nth-child(2) { --dot: var(--yellow); --num: #c98a00; }
+  .step:nth-child(3) { --dot: var(--green); --num: #1f9d36; }
+  .facts { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  .fact { border-left: 4px solid var(--dot); margin-bottom: 0; }
+  .fact:nth-child(1) { --dot: var(--orange); }
+  .fact:nth-child(2) { --dot: var(--blue); }
+  .fact:nth-child(3) { --dot: var(--green); }
+  .fact:nth-child(4) { --dot: var(--purple); }
+  .fact h4 { margin: 0 0 6px; font-size: 16px; }
+  .fact code { font-size: 14.5px; padding: 1px 6px; border-radius: 6px; background: #f3f1ee; }
+  .fact p { color: var(--muted); font-size: 15px; }
+  .chips { display: flex; flex-wrap: wrap; gap: 8px; }
+  .chip { display: inline-flex; align-items: center; gap: 8px; padding: 8px 14px; border-radius: 12px; background: var(--white); border: 1px solid var(--line); box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04); font-size: 15px; }
+  .chip::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--dot); }
+  .chip:nth-child(5n+1) { --dot: var(--orange); }
+  .chip:nth-child(5n+2) { --dot: var(--blue); }
+  .chip:nth-child(5n+3) { --dot: var(--green); }
+  .chip:nth-child(5n+4) { --dot: var(--purple); }
+  .chip:nth-child(5n+5) { --dot: var(--red); }
+  .win { color: #137a26; font-weight: 700; }
+  .note { color: var(--muted); font-size: 14px; margin-top: 12px; }
+  .limits li { color: var(--muted); }
+  .limits li span { color: var(--text); font-weight: 600; }
+
+  /* ---------- Обо мне ---------- */
+  .profile { display: grid; grid-template-columns: auto 1fr; gap: 28px; align-items: center; padding: 32px; }
+  .avatar {
+    width: 120px;
+    height: 120px;
+    border-radius: 50%;
+    display: grid;
+    place-items: center;
+    font-size: 40px;
+    font-weight: 800;
+    color: var(--white);
+    background: linear-gradient(135deg, var(--yellow), var(--orange) 50%, var(--red));
+    box-shadow: 0 0 0 6px var(--white), 0 18px 40px -12px rgba(255, 95, 87, 0.6);
+  }
+  .profile h2 { margin-bottom: 4px; }
+  .role { color: var(--orange-dark); font-weight: 650; margin-bottom: 14px; }
+  .tags { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 14px; }
+  .tag { font-size: 13px; font-weight: 600; padding: 4px 10px; border-radius: 999px; color: var(--c); background: color-mix(in srgb, var(--c) 12%, white); }
+  .profile p + p { margin-top: 10px; }
+  .contacts { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+  .contact { display: block; color: var(--text); margin-bottom: 0; border-top: 4px solid var(--c); }
+  .contact:hover { text-decoration: none; transform: translateY(-2px); }
+  .contact { transition: transform 0.15s; }
+  .contact-label { color: var(--muted); font-size: 12.5px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; }
+  .contact-value { font-size: 17px; font-weight: 700; margin-top: 4px; color: var(--c); }
+  .project-link { display: flex; justify-content: space-between; align-items: center; gap: 16px; flex-wrap: wrap; }
+
+  /* ---------- Подвал ---------- */
+  footer {
+    width: var(--width);
+    margin: 0 auto 24px;
+    padding: 20px 4px;
+    border-top: 1px solid var(--line);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 12px;
+    color: var(--muted);
+    font-size: 13.5px;
+  }
+  footer nav { display: flex; gap: 16px; }
+
+  /* ---------- Телефон: вкладки внизу экрана ---------- */
+  @media (max-width: 760px) {
+    /* backdrop-filter у шапки «запирает» position: fixed внутри неё, поэтому на телефоне — плотный фон */
+    header { padding: 10px 14px; backdrop-filter: none; -webkit-backdrop-filter: none; background: rgba(255, 255, 255, 0.96); }
+    .tabs {
+      position: fixed;
+      left: 12px;
+      right: 12px;
+      bottom: 12px;
+      justify-content: space-around;
+      padding: 8px;
+      border-radius: 18px;
+      background: rgba(255, 255, 255, 0.96);
+      border: 1px solid var(--line);
+      box-shadow: var(--shadow);
+    }
+    header .btn-ghost { margin-left: auto; }
+    body { padding-bottom: 90px; }
+    .grid-2, .steps, .facts, .contacts { grid-template-columns: 1fr; }
+    .profile { grid-template-columns: 1fr; text-align: center; justify-items: center; }
+    .tags { justify-content: center; }
+    .card, .window-body { padding: 20px; }
+  }
+</style>
+</head>
+<body>
+
+<!-- Фон-«обои»: светлое небо сверху, внизу перекрывающиеся цветные волны, как на macOS Big Sur / Sonoma -->
+<svg class="wallpaper" aria-hidden="true" viewBox="0 0 1440 900" preserveAspectRatio="xMidYMid slice">
+  <defs>
+    <linearGradient id="wp-sky" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#fff4e9"/>
+      <stop offset="0.55" stop-color="#fdeef0"/>
+      <stop offset="1" stop-color="#eaf2ff"/>
+    </linearGradient>
+    <linearGradient id="wp-1" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#ffd36b"/>
+      <stop offset="1" stop-color="#ff9a3c"/>
+    </linearGradient>
+    <linearGradient id="wp-2" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#ff9f6e"/>
+      <stop offset="1" stop-color="#ff5f57"/>
+    </linearGradient>
+    <linearGradient id="wp-3" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#ff7a1a"/>
+      <stop offset="1" stop-color="#c86be6"/>
+    </linearGradient>
+    <linearGradient id="wp-4" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#7cc0ff"/>
+      <stop offset="1" stop-color="#0a84ff"/>
+    </linearGradient>
+    <filter id="wp-glow" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="60"/></filter>
+    <filter id="wp-soft"><feGaussianBlur stdDeviation="5"/></filter>
+  </defs>
+  <rect width="1440" height="900" fill="url(#wp-sky)"/>
+  <circle cx="140" cy="60" r="300" fill="#ff7a1a" opacity="0.22" filter="url(#wp-glow)"/>
+  <circle cx="1280" cy="140" r="260" fill="#febc2e" opacity="0.25" filter="url(#wp-glow)"/>
+  <g filter="url(#wp-soft)" opacity="0.8">
+    <path fill="url(#wp-1)" d="M0 520 C300 380 600 620 900 470 C1150 345 1300 300 1440 330 L1440 900 L0 900 Z"/>
+    <path fill="url(#wp-2)" d="M0 640 C260 520 520 720 820 600 C1080 500 1260 520 1440 470 L1440 900 L0 900 Z"/>
+    <path fill="url(#wp-3)" d="M0 760 C320 660 600 820 900 720 C1150 640 1300 690 1440 650 L1440 900 L0 900 Z"/>
+    <path fill="url(#wp-4)" d="M0 860 C360 790 640 900 960 830 C1200 780 1340 820 1440 800 L1440 900 L0 900 Z"/>
+  </g>
+</svg>
+
+<header>
+  <a href="#protocol" class="brand" data-tab="protocol"><span class="lights"><i></i><i></i><i></i></span>Meeting Summarizer</a>
+  <nav class="tabs">
+    <button class="tab" data-tab="protocol">Протокол</button>
+    <button class="tab" data-tab="about">О проекте</button>
+    <button class="tab" data-tab="me">Обо мне</button>
+  </nav>
+  <a class="btn btn-ghost" href="https://t.me/by_yaros" target="_blank" rel="noopener"><span class="tg"></span>Telegram @by_yaros</a>
+</header>
+
+<main>
+
+  <!-- ===================== Протокол ===================== -->
+  <div data-page="protocol">
+    <section class="hero">
+      <div class="eyebrow">AI-конспект совещаний</div>
+      <h1>Аудиозапись совещания →<br><span class="gradient-text">готовый протокол</span></h1>
+      <p class="lead">Загрузите запись — сервис выделит темы, решения и задачи с ответственными и сроками и сделает полную расшифровку. Не нужно вести заметки во время встречи.</p>
+      <div class="pills">
+        <span class="pill">Бесплатно</span>
+        <span class="pill">Работает на вашем компьютере</span>
+        <span class="pill">Запись никуда не отправляется</span>
+        <span class="pill">Русский язык</span>
+      </div>
+    </section>
+
+    <div id="health" class="notice warn" hidden></div>
+
+    <section class="card window">
+      <div class="titlebar">
+        <span class="lights"><i></i><i></i><i></i></span>
+        <span class="titlebar-title">Новая запись</span>
+        <span></span>
+      </div>
+      <div class="window-body">
+        <label id="drop-zone" class="drop-zone">
+          <input id="file-input" type="file" accept=".mp3,.m4a,.wav,.ogg,.oga">
+          <div class="drop-icon">↑</div>
+          <div class="drop-title">Перетащите файл сюда или <u>выберите на компьютере</u></div>
+          <div class="hint">MP3, M4A, WAV или OGG (голосовые Telegram) · до 15 минут · до 50 МБ</div>
+          <div id="file-name" class="file-name"></div>
+        </label>
+        <div class="upload-actions">
+          <button id="process-btn" class="btn btn-primary" disabled>Сделать протокол</button>
+        </div>
+      </div>
+    </section>
+
+    <div id="loader" class="card" hidden>
+      <div class="loader-title">Идёт обработка… <span id="timer">0:00</span></div>
+      <div class="progress"><div></div></div>
+      <p class="hint">Сначала распознаётся речь, затем нейросеть составляет протокол. Это может занять несколько минут — не закрывайте страницу.</p>
+    </div>
+
+    <div id="error" class="notice error" hidden></div>
+
+    <div id="result" hidden>
+      <div class="result-head">
+        <div>
+          <h2>Протокол <span class="badge">готов</span></h2>
+          <div id="stats" class="stats"></div>
+        </div>
+        <button id="download-btn" class="btn btn-primary">Скачать .txt</button>
+      </div>
+
+      <div class="grid-2">
+        <section class="card dot-blue">
+          <h3>Темы</h3>
+          <ol id="topics"></ol>
+        </section>
+        <section class="card dot-green">
+          <h3>Решения и итоги</h3>
+          <ul id="decisions"></ul>
+        </section>
+      </div>
+
+      <section class="card dot-yellow">
+        <h3>Краткое содержание</h3>
+        <p id="summary" class="summary"></p>
+      </section>
+
+      <section class="card">
+        <h3>Задачи</h3>
+        <div class="table-wrap">
+          <table id="tasks-table">
+            <thead><tr><th>Что сделать</th><th>Ответственный</th><th>Срок</th></tr></thead>
+            <tbody id="tasks"></tbody>
+          </table>
+        </div>
+        <p id="tasks-empty" class="empty" hidden>Задач не зафиксировано</p>
+      </section>
+
+      <section class="card">
+        <details>
+          <summary>Полная расшифровка</summary>
+          <div id="transcript" class="transcript"></div>
+        </details>
+      </section>
+    </div>
+  </div>
+
+  <!-- ===================== О проекте ===================== -->
+  <div data-page="about" hidden>
+    <section class="section story">
+      <div class="eyebrow">История проекта</div>
+      <h2>Почему я создал этот проект</h2>
+      <div class="card window">
+        <div class="titlebar">
+          <span class="lights"><i></i><i></i><i></i></span>
+          <span class="titlebar-title">story.txt</span>
+          <span></span>
+        </div>
+        <div class="window-body">
+          <p>Идея появилась на встрече сообщества ODS в Москве. Мы с парой участников разговорились о задачах на стыке NLP и звука — один из ребят учится в ВШЭ, и у него как раз было такое учебное задание.</p>
+          <p>Потом разговор ушёл в практическую сторону: как было бы удобно не отвлекаться на заметки во время встречи. Не бояться что-то пропустить или забыть, не сидеть потом и не вспоминать, о чём говорили, — а просто загрузить запись и сразу получить краткий конспект, где собраны все темы и всё понятно.</p>
+          <p>Я решил сделать такой инструмент — бесплатный и работающий прямо на компьютере, чтобы записи разговоров никуда не уходили. Заодно прошёл путь от моделей к продукту: распознавание речи → работа с LLM и промптами → сравнение моделей на эталонной записи → бэкенд на FastAPI → интерфейс.</p>
+        </div>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="eyebrow">Как это работает</div>
+      <h2>Три шага от звука к протоколу</h2>
+      <div class="steps">
+        <div class="card step">
+          <div class="step-num">01</div>
+          <h4>Распознавание речи</h4>
+          <p>Модель Whisper переводит звук в текст. Паузы вырезаются заранее, чтобы модель не «додумывала» фразы в тишине.</p>
+        </div>
+        <div class="card step">
+          <div class="step-num">02</div>
+          <h4>Анализ нейросетью</h4>
+          <p>Локальная языковая модель читает расшифровку и выделяет темы, решения и задачи — строго по тексту и в заданной структуре.</p>
+        </div>
+        <div class="card step">
+          <div class="step-num">03</div>
+          <h4>Протокол</h4>
+          <p>Результат появляется на странице, его можно скачать одним файлом. Запись удаляется сразу после обработки — сервер ничего не хранит.</p>
+        </div>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="eyebrow">Технологии</div>
+      <h2>Что внутри</h2>
+      <div class="chips">
+        <span class="chip">Python 3.12</span>
+        <span class="chip">FastAPI + Uvicorn</span>
+        <span class="chip">faster-whisper · small · int8</span>
+        <span class="chip">Ollama</span>
+        <span class="chip">gemma3:4b</span>
+        <span class="chip">Structured output (JSON-схема)</span>
+        <span class="chip">HTML / CSS / JS без фреймворков</span>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="eyebrow">Инженерные решения</div>
+      <h2>Что было интересно</h2>
+      <div class="facts">
+        <div class="card fact">
+          <h4>Промпт за 3 итерации</h4>
+          <p>Первая версия путала решения и задачи. Помогли чёткие определения полей, порядок полей в JSON-схеме и правило «отложенный вопрос — не решение и не задача».</p>
+        </div>
+        <div class="card fact">
+          <h4><code>num_ctx = 8192</code></h4>
+          <p>По умолчанию Ollama берёт маленький контекст и молча обрезает длинную расшифровку. Сервис явно задаёт размер окна и логирует, сколько токенов модель прочитала.</p>
+        </div>
+        <div class="card fact">
+          <h4><code>def</code>, а не <code>async def</code></h4>
+          <p>Обработка тяжёлая и синхронная. Обычная функция выполняется в отдельном потоке, поэтому сервер не «замирает» на время распознавания.</p>
+        </div>
+        <div class="card fact">
+          <h4><code>av==18.1.0</code></h4>
+          <p>За несколько дней до старта проекта вышла PyAV 19 и сломала faster-whisper. Нашёл причину по трейсбеку и зафиксировал совместимую версию.</p>
+        </div>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="eyebrow">Выбор модели</div>
+      <h2>Сравнил две модели — выбрал по фактам</h2>
+      <div class="card">
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Проверка (2 прогона)</th><th>qwen2.5:3b</th><th>gemma3:4b</th></tr></thead>
+            <tbody>
+              <tr><td>Найдены все 4 задачи</td><td>2 из 2</td><td>2 из 2</td></tr>
+              <tr><td>Отложенный вопрос не превращён в задачу</td><td>1 из 2</td><td class="win">2 из 2</td></tr>
+              <tr><td>В решениях нет поручений</td><td>1 из 2</td><td class="win">2 из 2</td></tr>
+              <tr><td>Задача записана полностью</td><td>0 из 2</td><td class="win">2 из 2</td></tr>
+              <tr><td>Срок не выдуман, если его не называли</td><td>1 из 2</td><td>1 из 2</td></tr>
+              <tr><td>Краткое содержание без выдуманных фактов</td><td>0 из 2</td><td class="win">2 из 2</td></tr>
+              <tr><td>Время конспекта (запись 3 мин)</td><td>~50 с</td><td>~50 с</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p class="note">Тест — запись планёрки с заранее известными ответами и «ловушками»: задача без ответственного, задача без срока, вопрос, который отложили.</p>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="eyebrow">Честно</div>
+      <h2>Ограничения</h2>
+      <div class="card dot-red">
+        <ul class="limits">
+          <li><span>Маленькая модель иногда «додумывает» срок,</span> если он упомянут косвенно. Протокол стоит проверять.</li>
+          <li><span>Нет разделения по спикерам</span> — в расшифровке не видно, кто именно говорит.</li>
+          <li><span>Ошибки распознавания</span> в именах, терминах и окончаниях.</li>
+          <li><span>Записи до 15 минут</span> — более длинные не помещаются в контекст модели.</li>
+        </ul>
+      </div>
+    </section>
+  </div>
+
+  <!-- ===================== Обо мне ===================== -->
+  <div data-page="me" hidden>
+    <section class="section">
+      <div class="card profile">
+        <div class="avatar">ЯЖ</div>
+        <div>
+          <div class="eyebrow">Автор</div>
+          <h2>Ярослав Жежу</h2>
+          <div class="role">Data Scientist · 20 лет · Москва</div>
+          <p>Около года занимаюсь машинным обучением, интересуюсь ML, LLM, NLP, статистикой и новыми технологиями.</p>
+          <p>Открыт к стажировкам и работе в ML.</p>
+          <div class="tags">
+            <span class="tag" style="--c: var(--orange-dark)">ML</span>
+            <span class="tag" style="--c: var(--blue)">LLM</span>
+            <span class="tag" style="--c: #1f9d36">NLP</span>
+            <span class="tag" style="--c: var(--purple)">Статистика</span>
+            <span class="tag" style="--c: #e5443b">Новые технологии</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="contacts">
+        <a class="card contact" style="--c: var(--blue)" href="https://t.me/by_yaros" target="_blank" rel="noopener">
+          <div class="contact-label">Telegram</div>
+          <div class="contact-value">@by_yaros</div>
+        </a>
+        <a class="card contact" style="--c: var(--text)" href="https://github.com/LYNORR" target="_blank" rel="noopener">
+          <div class="contact-label">GitHub</div>
+          <div class="contact-value">LYNORR</div>
+        </a>
+        <a class="card contact" style="--c: var(--orange-dark)" href="mailto:yarosteam@yandex.ru">
+          <div class="contact-label">Почта</div>
+          <div class="contact-value">yarosteam@yandex.ru</div>
+        </a>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="eyebrow">Другие проекты</div>
+      <div class="card project-link dot-purple">
+        <div>
+          <h3>Sleep Quality Tracker</h3>
+          <p class="hint">Экспресс-тест сна на ML: 10 вопросов о дне — и модели XGBoost и CatBoost оценивают качество сна прямо в браузере.</p>
+        </div>
+        <a class="btn btn-ghost" href="https://github.com/LYNORR/sleep-quality-tracker" target="_blank" rel="noopener">Открыть на GitHub →</a>
+      </div>
+    </section>
+  </div>
+
+</main>
+
+<footer>
+  <span class="brand" style="font-weight: 500; color: var(--muted);"><span class="lights"><i></i><i></i><i></i></span>© 2026 Ярослав Жежу · Meeting Summarizer</span>
+  <nav>
+    <a href="https://t.me/by_yaros" target="_blank" rel="noopener">Telegram</a>
+    <a href="https://github.com/LYNORR" target="_blank" rel="noopener">GitHub</a>
+    <a href="mailto:yarosteam@yandex.ru">Почта</a>
+  </nav>
+  <span>Протокол составляет ИИ — проверяйте важные детали.</span>
+</footer>
+
+<script>
+  // ---------- Вкладки ----------
+  const PAGES = ["protocol", "about", "me"];
+
+  function showTab(name) {
+    if (!PAGES.includes(name)) name = "protocol";
+    document.querySelectorAll("[data-page]").forEach((page) => {
+      page.hidden = page.dataset.page !== name;
+    });
+    document.querySelectorAll(".tab").forEach((tab) => {
+      tab.classList.toggle("active", tab.dataset.tab === name);
+    });
+    history.replaceState(null, "", "#" + name);  // адрес вкладки можно скопировать и отправить
+    window.scrollTo(0, 0);
+  }
+
+  document.querySelectorAll("[data-tab]").forEach((element) => {
+    element.addEventListener("click", (event) => {
+      event.preventDefault();
+      showTab(element.dataset.tab);
+    });
+  });
+  showTab(location.hash.slice(1));
+
+  // ---------- Загрузка и обработка ----------
+  // Те же лимиты, что в app/config.py: проверяем заранее, чтобы не загружать заведомо неподходящий файл.
+  const MAX_MB = 50;
+  const ALLOWED = [".mp3", ".m4a", ".wav", ".ogg", ".oga"];
+
+  const $ = (id) => document.getElementById(id);
+  let selectedFile = null;
+  let reportText = "";
+  let timerId = null;
+
+  function showError(message) {
+    $("error").textContent = message;
+    $("error").hidden = false;
+  }
+
+  function selectFile(file) {
+    $("error").hidden = true;
+    const ext = file.name.slice(file.name.lastIndexOf(".")).toLowerCase();
+    if (!ALLOWED.includes(ext)) {
+      showError("Неподдерживаемый формат. Загрузите файл .mp3, .m4a, .wav или .ogg");
+      return;
+    }
+    if (file.size > MAX_MB * 1024 * 1024) {
+      showError(`Файл больше ${MAX_MB} МБ.`);
+      return;
+    }
+    selectedFile = file;
+    $("file-name").textContent = `${file.name} · ${(file.size / 1024 / 1024).toFixed(1)} МБ`;
+    $("process-btn").disabled = false;
+  }
+
+  // Выбор файла через диалог
+  $("file-input").addEventListener("change", (event) => {
+    if (event.target.files.length) selectFile(event.target.files[0]);
+  });
+
+  // Перетаскивание файла (drag-and-drop)
+  const dropZone = $("drop-zone");
+  dropZone.addEventListener("dragover", (event) => {
+    event.preventDefault();  // без этого браузер просто откроет файл
+    dropZone.classList.add("dragover");
+  });
+  dropZone.addEventListener("dragleave", () => dropZone.classList.remove("dragover"));
+  dropZone.addEventListener("drop", (event) => {
+    event.preventDefault();
+    dropZone.classList.remove("dragover");
+    if (event.dataTransfer.files.length) selectFile(event.dataTransfer.files[0]);
+  });
+
+  function setBusy(busy) {
+    // Блокируем кнопку и выбор файла, чтобы не отправить запись повторно
+    $("process-btn").disabled = busy;
+    $("file-input").disabled = busy;
+    $("loader").hidden = !busy;
+    clearInterval(timerId);
+    if (busy) {
+      const started = Date.now();
+      $("timer").textContent = "0:00";
+      timerId = setInterval(() => {
+        $("timer").textContent = formatTime((Date.now() - started) / 1000);
+      }, 1000);
+    }
+  }
+
+  function formatTime(seconds) {
+    const s = Math.round(seconds);
+    return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+  }
+
+  async function processFile() {
+    $("error").hidden = true;
+    $("result").hidden = true;
+    setBusy(true);
+    const form = new FormData();
+    form.append("file", selectedFile);
+    try {
+      const response = await fetch("/api/process", { method: "POST", body: form });
+      const data = await response.json().catch(() => null);
+      if (!response.ok) {
+        const detail = data && typeof data.detail === "string" ? data.detail : null;
+        showError(detail || `Ошибка сервера (код ${response.status}). Подробности — в терминале с сервером.`);
+        return;
+      }
+      renderResult(data);
+    } catch {
+      showError("Нет связи с сервером. Проверьте, что он запущен командой uvicorn app.main:app");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  // Заполняем список. Только textContent, не innerHTML: текст приходит от модели (защита от XSS).
+  function fillList(element, items, emptyText) {
+    element.replaceChildren();
+    if (!items.length) items = [emptyText];
+    for (const item of items) {
+      const li = document.createElement("li");
+      li.textContent = item;
+      element.appendChild(li);
+    }
+  }
+
+  function renderResult(data) {
+    fillList($("topics"), data.topics, "Не выделены");
+    fillList($("decisions"), data.decisions, "Решений не зафиксировано");
+    $("summary").textContent = data.summary;
+    $("transcript").textContent = data.transcript;
+
+    const tbody = $("tasks");
+    tbody.replaceChildren();
+    for (const task of data.tasks) {
+      const row = tbody.insertRow();
+      for (const value of [task.task, task.owner, task.deadline]) {
+        row.insertCell().textContent = value;
+      }
+    }
+    $("tasks-table").hidden = data.tasks.length === 0;
+    $("tasks-empty").hidden = data.tasks.length > 0;
+
+    const s = data.stats;
+    $("stats").textContent =
+      `Запись ${formatTime(s.duration_sec)} · распознавание ${Math.round(s.transcribe_sec)} с · ` +
+      `конспект ${Math.round(s.summarize_sec)} с`;
+
+    reportText = data.report_text;
+    $("result").hidden = false;
+    $("result").scrollIntoView({ block: "start" });
+  }
+
+  // Файл формируется прямо в браузере (Blob): сервер ничего не хранит.
+  function downloadReport() {
+    const blob = new Blob([reportText], { type: "text/plain;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    const d = new Date();
+    const date = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+    link.href = url;
+    link.download = `protocol_${date}.txt`;
+    link.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+
+  $("process-btn").addEventListener("click", processFile);
+  $("download-btn").addEventListener("click", downloadReport);
+
+  // При открытии страницы проверяем, что Ollama запущена и модель скачана.
+  fetch("/api/health")
+    .then((response) => response.json())
+    .then((data) => {
+      if (!data.ok) {
+        $("health").textContent = data.message;
+        $("health").hidden = false;
+      }
+    })
+    .catch(() => {});
+</script>
+</body>
+</html>
